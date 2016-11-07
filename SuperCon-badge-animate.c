@@ -107,6 +107,11 @@ void drawScreen(uint8_t medic, uint8_t rightBar, uint8_t infected){
     displayLatch();
 }
 
+uint8_t GetRand(){
+    asm("call 0x2B0C");
+    return WREG;
+}
+
 #define MAX_HEALTH (16)
 #define MIN_HEALTH (0)
 #define MEDIC_SEND_CNT (40)
@@ -125,20 +130,18 @@ void decrement(uint8_t* val){
     else *val = MIN_HEALTH;
 }
 #define DECAY_SEC (15) // seconds to lose 1 health
+#define INFECTION_CHANCE (256/20)
+#define MEDIC_INFECTION_CHANCE (256/40)
+#define STARTUP_INFECTION_CHANCE (256/4)
 
 void HandleInfection(uint8_t remote_infected, uint32_t rnd){
     if(remote_infected){//remote infected
         // Infection probability is 50% unless I'm a medic, it's 25%
-        if ((rnd > (255-12) && medic == 0) ||
-            (rnd > (255-6) && medic == 1)){
+        if ((rnd < INFECTION_CHANCE && medic == 0) ||
+            ((rnd < MEDIC_INFECTION_CHANCE) && medic == 1)){
             infected = 1;
         }
     }
-}
-
-uint8_t GetRand(){
-    asm("call 0x2B0C");
-    return WREG;
 }
 
 // Main loop for the program
@@ -154,7 +157,13 @@ void animateBadge(void) {
     uint8_t response = 0;
     uint32_t healthTxd = 0;
     uint32_t healthRxd = 0;
+    int32_t infectionTime = 0;
+    uint8_t infected_last = 0;
+
+    // Initial chance of infection = 1/4
+    if(GetRand() < STARTUP_INFECTION_CHANCE){ infected = 1; }
     
+
     if(0 == UART_Init(4800)){
         displayPixel(0,0,ON);
     }
@@ -182,8 +191,10 @@ void animateBadge(void) {
                     decaySec = DECAY_SEC;
                 }
             }
-            HandleInfection(0, rnd);// random (lower) chance of infection
+            HandleInfection(0, rnd);// random (lower) chance of infection`
             medic = (healthTxd > MEDIC_SEND_CNT) && (healthRxd > MEDIC_SEND_CNT);
+
+            if(infected){infectionTime++;}
             displayPixel(0,0,OFF); // clear the TX indicator
             displayPixel(1,0,OFF); // clear the RX indicator
         }
@@ -193,7 +204,7 @@ void animateBadge(void) {
         // Handle packet receive
         if(UART_Data_Ready()){
             uint8_t ch = UART_Read();
-            if(ch == 'i' || ch == 'h'){
+            if(ch == 'i' || ch == 'h' || ch == 'm'){
                 displayPixel(1,0,ON);                
                 if(getTime() > lastHealthTx+200){ // don't count our own tx's
                     increment(&health);
